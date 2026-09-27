@@ -1,0 +1,14 @@
+{
+  "email": {
+    "enable": false,
+    "smtp_host": "smtp.qq.com",
+    "smtp_port": 465,
+    "use_ssl": true,
+    "sender": "",
+    "auth_code_encrypted": "",
+    "to": ""
+  },
+  "local": {
+    "enable": true
+  }
+}

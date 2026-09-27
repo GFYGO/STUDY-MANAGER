@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>AI 对话渲染</title>
+<!-- KaTeX 数学公式 -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<!-- highlight.js 代码高亮主题 -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.9.0/styles/github.min.css">
+<style>
+  body {
+    margin: 0;
+    padding: 12px 16px 30px;
+    font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.7;
+    color: #1a1a1a;
+    background: #fbfbfd;
+  }
+  .msg { margin-bottom: 12px; }
+  .bubble {
+    padding: 8px 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+    word-break: break-word;
+  }
+  .bubble .who { font-weight: bold; margin-bottom: 4px; }
+  .bubble.user { background: #e7f1fb; }
+  .bubble.user .who { color: #0b5394; }
+  .bubble.ai { background: #ffffff; border: 1px solid #e4e7eb; }
+  .bubble.ai .who { color: #0b5394; }
+  .bubble.system { background: #fdf6e3; color: #8a6d3b; font-size: 13px; }
+  .bubble.tool { color: #777; font-size: 12px; }
+  .md { overflow-x: auto; }
+
+  /* --- Markdown 样式 --- */
+  .md h1, .md h2, .md h3, .md h4 { margin: 12px 0 6px; line-height: 1.4; }
+  .md h1 { font-size: 1.5em; border-bottom: 1px solid #eee; padding-bottom: 4px; }
+  .md h2 { font-size: 1.3em; border-bottom: 1px solid #eee; padding-bottom: 3px; }
+  .md h3 { font-size: 1.15em; }
+  .md p { margin: 6px 0; }
+  .md ul, .md ol { margin: 6px 0; padding-left: 1.6em; }
+  .md li { margin: 2px 0; }
+  .md blockquote {
+    margin: 8px 0; padding: 4px 12px;
+    border-left: 4px solid #c9d6e4; color: #555; background: #f7f9fb;
+    border-radius: 0 4px 4px 0;
+  }
+  .md code {
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 0.92em;
+    background: #f0f0f3; padding: 1px 5px; border-radius: 3px;
+  }
+  .md pre {
+    background: #f6f8fa; padding: 10px 12px; border-radius: 6px;
+    overflow-x: auto; line-height: 1.5;
+  }
+  .md pre code { background: transparent; padding: 0; }
+  .md table { border-collapse: collapse; margin: 8px 0; }
+  .md th, .md td { border: 1px solid #d5d9de; padding: 5px 10px; }
+  .md th { background: #f0f4f8; }
+  .md a { color: #0b5394; text-decoration: none; }
+  .md a:hover { text-decoration: underline; }
+  .md img { max-width: 100%; }
+  .md hr { border: none; border-top: 1px solid #e4e7eb; margin: 12px 0; }
+  .md .katex-display { overflow-x: auto; overflow-y: hidden; }
+
+  /* --- Mermaid（思维导图/流程图等） --- */
+  .mermaid {
+    background: #f6f8fa; border-radius: 6px; padding: 8px;
+    overflow-x: auto; text-align: center;
+    font-family: "Microsoft YaHei", sans-serif;
+    max-width: 100%;
+  }
+  .mermaid svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* --- AI 消息操作按钮（复制） --- */
+  .actions { text-align: right; margin-bottom: 4px; }
+  .copy-btn {
+    font-size: 11px; color: #667; background: #f2f4f7;
+    border: 1px solid #dfe3e8; border-radius: 4px;
+    padding: 1px 8px; margin-left: 6px; cursor: pointer;
+  }
+  .copy-btn:hover { background: #e7ecf2; }
+</style>
+</head>
+<body>
+<div id="chat"></div>
+
+<!-- 核心库（CDN，固定版本；主 unpkg，mermaid 额外有兜底） -->
+<script src="https://unpkg.com/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://unpkg.com/katex@0.16.9/dist/contrib/mhchem.min.js"></script>
+<script src="https://unpkg.com/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
+<script src="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/highlight.min.js"></script>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script>
+  // mermaid 体积大且高版本语法与内嵌 Chromium(87) 不兼容，用 9.4（支持 mindmap 且兼容旧内核），
+  // 动态加载并在多个 CDN 间兜底，避免单个 CDN 失败导致图表全部缺失
+  (function () {
+    var urls = [
+      "https://unpkg.com/mermaid@9.4.3/dist/mermaid.min.js",
+      "https://cdn.jsdelivr.net/npm/mermaid@9.4.3/dist/mermaid.min.js",
+      "https://cdn.bootcdn.net/ajax/libs/mermaid/9.4.3/mermaid.min.js",
+      "https://cdn.staticfile.org/mermaid/9.4.3/mermaid.min.js"
+    ];
+    var idx = 0;
+    function tryLoad() {
+      if (idx >= urls.length) {
+        console.error("mermaid 所有 CDN 均加载失败，思维导图/流程图将显示源代码");
+        return;
+      }
+      var s = document.createElement("script");
+      s.src = urls[idx++];
+      s.onload = function () {
+        if (typeof window.mermaid === "undefined") {
+          console.error("mermaid 加载但未生效，尝试下一 CDN");
+          tryLoad();
+        } else if (window.renderMessages && window.__lastMessages) {
+          // mermaid 就绪后重渲染一次，把此前未渲染的图表补上
+          window.renderMessages(window.__lastMessages);
+        }
+      };
+      s.onerror = function () { tryLoad(); };
+      document.head.appendChild(s);
+    }
+    tryLoad();
+  })();
+</script>
+<script>
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  // 用 KaTeX 渲染一段数学/化学公式文本
+  function renderKatex(str, isDisplay) {
+    var opts = { throwOnError: false, errorColor: "#cc0000", displayMode: !!isDisplay };
+    try {
+      return window.katex.renderToString(str, opts);
+    } catch (e) {
+      return '<span style="color:#cc0000">公式错误: ' + escapeHtml(str) + '</span>';
+    }
+  }
+
+  // 初始化 markdown-it：数学公式（KaTeX+mhchem）、代码高亮、mermaid
+  var md = null;
+  try {
+    md = window.markdownit({
+      html: false,
+      linkify: true,
+      highlight: function (str, lang) {
+        if (lang === "mermaid") {
+          // mermaid 代码块：交给 mermaid 渲染为图表
+          return '<div class="mermaid">' + escapeHtml(str) + '</div>';
+        }
+        if (lang && window.hljs && window.hljs.getLanguage(lang)) {
+          try {
+            return '<pre class="hljs"><code>' +
+              window.hljs.highlight(str, { language: lang, ignoreIllegals: true }).value +
+              '</code></pre>';
+          } catch (e) { /* fallthrough */ }
+        }
+        return "";
+      }
+    });
+
+    // 自定义 block 规则：$$...$$ 块级公式（KaTeX display）
+    md.block.ruler.after("blockquote", "katex_block", function (state, startLine, endLine, silent) {
+      // 当前行必须是独立的一行 "$$"
+      if (state.src.slice(state.bMarks[startLine] + state.tShift[startLine],
+                          state.eMarks[startLine]) !== "$$") { return false; }
+      // 从下一行开始找独立的结束行 "$$"
+      var lines = [];
+      var nextLine = -1;
+      for (var i = startLine + 1; i <= endLine; i++) {
+        var raw = state.src.slice(state.bMarks[i] + state.tShift[i], state.eMarks[i]);
+        if (raw === "$$") { nextLine = i + 1; break; }
+        lines.push(raw);
+      }
+      if (nextLine < 0) { return false; }  // 无闭合，不当作公式
+      if (silent) { return true; }
+      state.line = nextLine;
+      var token = state.push("katex_block", "", 0);
+      token.content = lines.join("\n");
+      token.map = [startLine, nextLine];
+      return true;
+    });
+    md.renderer.rules.katex_block = function (tokens, idx) {
+      return '<div style="overflow-x:auto;text-align:center;margin:8px 0;">' +
+        renderKatex(tokens[idx].content, true) + '</div>';
+    };
+
+    // 自定义 inline 规则：$...$ 行内公式（KaTeX，支持化学 \ce{}）
+    md.inline.ruler.after("emphasis", "katex_inline", function (state, silent) {
+      var pos = state.pos;
+      if (state.src.charAt(pos) !== "$") { return false; }
+      var next = state.src.charAt(pos + 1);
+      if (next === "$" || next === " ") { return false; }  // $$ 留给 block；$ 后跟空格不算公式
+      var end = -1;
+      for (var i = pos + 1; i < state.posMax; i++) {
+        if (state.src.charAt(i) === "$") {
+          end = i; break;
+        }
+      }
+      if (end < 0) { return false; }
+      var content = state.src.slice(pos + 1, end);
+      if (!content) { return false; }
+      if (!silent) {
+        var token = state.push("katex_inline", "", 0);
+        token.content = content;
+      }
+      state.pos = end + 1;
+      return true;
+    });
+    md.renderer.rules.katex_inline = function (tokens, idx) {
+      return renderKatex(tokens[idx].content, false);
+    };
+  } catch (e) {
+    md = null;
+    console.error("markdown-it init failed:", e);
+  }
+
+  // 渲染整段对话（messages: [[kind, text], ...]，kind ∈ user/ai/system/tool）
+  window.renderMessages = function (messages) {
+    window.__lastMessages = messages;
+    var chat = document.getElementById("chat");
+    chat.innerHTML = "";
+    for (var i = 0; i < messages.length; i++) {
+      var kind = messages[i][0];
+      var text = String(messages[i][1]);
+      var p = document.createElement("div");
+      p.className = "msg";
+      if (kind === "system") {
+        p.innerHTML = '<div class="bubble system">【学习助手】' + escapeHtml(text).replace(/\n/g, "<br>") + '</div>';
+      } else if (kind === "user") {
+        p.innerHTML = '<div class="bubble user"><div class="who">我</div><div class="txt">' + escapeHtml(text).replace(/\n/g, "<br>") + '</div></div>';
+      } else if (kind === "tool") {
+        p.innerHTML = '<div class="bubble tool">· AI 自动执行：' + escapeHtml(text.substring(0, 120)) + '</div>';
+      } else {
+        var html;
+        try {
+          html = md ? md.render(text) : escapeHtml(text).replace(/\n/g, "<br>");
+        } catch (e) {
+          html = escapeHtml(text).replace(/\n/g, "<br>");
+        }
+        // 保存原始文本，供"复制为MD"使用（dataset 赋值自动处理转义）
+        p.dataset.raw = text;
+        p.innerHTML =
+          '<div class="bubble ai"><div class="who">AI</div>' +
+          '<div class="actions">' +
+          '<button class="copy-btn" data-copy="md">复制为MD</button>' +
+          '<button class="copy-btn" data-copy="text">复制为文本</button>' +
+          '</div><div class="md">' + html + '</div></div>';
+      }
+      chat.appendChild(p);
+    }
+    runMermaid();
+    window.scrollTo(0, document.body.scrollHeight);
+  };
+
+  // 渲染页面中的 mermaid 图表（思维导图 / 流程图 / 时序图等）
+  function runMermaid() {
+    if (window.mermaid && document.querySelector("div.mermaid")) {
+      try {
+        mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose" });
+        if (typeof mermaid.run === "function") {
+          var p = mermaid.run({ querySelector: "div.mermaid" });
+          if (p && p.catch) {
+            p.catch(function (e) {
+              window.__merr = String((e && e.message) || e);
+              console.error("mermaid render error:", e);
+            });
+          }
+        } else {
+          // 旧版 API：mermaid.init 直接处理页面中的图表元素
+          mermaid.init(undefined, "div.mermaid");
+        }
+      } catch (e) {
+        window.__merr = String((e && e.message) || e);
+        console.error("mermaid failed:", e);
+      }
+    }
+  }
+
+  // 渲染单篇 Markdown 文档（文档面板"MD 预览"复用）
+  window.renderDoc = function (title, text) {
+    window.__lastDoc = { title: title, text: text };
+    var chat = document.getElementById("chat");
+    chat.innerHTML = "";
+    var p = document.createElement("div");
+    p.className = "msg";
+    var html;
+    try {
+      html = md ? md.render(text) : escapeHtml(text).replace(/\n/g, "<br>");
+    } catch (e) {
+      html = escapeHtml(text).replace(/\n/g, "<br>");
+    }
+    p.innerHTML = '<div class="bubble ai"><div class="who">' + escapeHtml(title) +
+      '</div><div class="md">' + html + '</div></div>';
+    chat.appendChild(p);
+    runMermaid();
+    window.scrollTo(0, document.body.scrollHeight);
+  };
+
+  // 页面内的普通链接：阻止在 WebEngine 内跳转，交由 Qt 打开外部浏览器
+  document.addEventListener("click", function (e) {
+    // 复制按钮：文本/MD 两种格式，通过 Qt bridge 写入系统剪贴板
+    var btn = e.target && e.target.closest ? e.target.closest(".copy-btn") : null;
+    if (btn) {
+      var msgEl = btn.closest(".msg");
+      var mdEl = msgEl ? msgEl.querySelector(".md") : null;
+      var text;
+      if (btn.dataset.copy === "md") {
+        text = msgEl ? (msgEl.dataset.raw || "") : "";
+      } else {
+        text = mdEl ? mdEl.innerText : (msgEl ? (msgEl.dataset.raw || "") : "");
+      }
+      if (window.qt && window.qt.copyText) {
+        window.qt.copyText(text);
+        var old = btn.textContent;
+        btn.textContent = "已复制";
+        setTimeout(function () { btn.textContent = old; }, 1200);
+      }
+      return;
+    }
+    var t = e.target && e.target.closest ? e.target.closest("a") : null;
+    if (t && t.href) {
+      e.preventDefault();
+      if (window.qt && window.qt.openLink) {
+        window.qt.openLink(t.href);
+      }
+    }
+  });
+</script>
+</body>
+</html>
