@@ -39,25 +39,9 @@ jobs:
           pip install pyinstaller
           pip install -r requirements.txt
 
-      - name: Build (Linux)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Build
         run: |
-          pyinstaller --onefile --clean --noconfirm \
-            --name myapp-linux \
-            --add-data "config:config" \
-            --hidden-import=your.optional.module \
-            main.py
-          chmod +x dist/myapp-linux
-
-      - name: Build (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          pyinstaller --onefile --clean --noconfirm `
-            --name myapp-windows `
-            --add-data "config;config" `
-            --hidden-import=your.optional.module `
-            main.py
+          pyinstaller study-manager.spec --clean --noconfirm
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
