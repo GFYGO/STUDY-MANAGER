@@ -1,1 +1,4 @@
-PyQt5>=5.15
+# 版本与本地已验证环境对齐，勿随意升级（PyQtWebEngine 仅官方 PyPI 提供）
+PyQt5==5.15.7
+PyQtWebEngine==5.15.7
+cryptography>=41.0
